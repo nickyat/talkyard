@@ -1626,29 +1626,32 @@ export function deleteDrafts(draftNrs: DraftNr[], onOk: (() => void) | UseBeacon
 }
 
 
+// COULD_OPTIMIZE: Cache both inline and block previews; have server return both.
+// UX And then it'd be simple to create Wikipedia style inline link block preview popups
 const cachedLinkPreviewHtml = {};
 
-export function loadOneboxSafeHtml(url: St, /* later: curPageId: PageId, */
+export function fetchLinkPreview(url: St, inline: Bo, /* later: curPageId: PageId, */
         onOk: (safeHtml: St) => Vo) {
   const curPageId = '123'; // whatever, for now
   // People often accidentally append spaces, so trim spaces.
   // But where's a good palce to trim spaces? The caller or here? Here, for now.
   url = url.trim();
 
-  const cachedHtml = cachedLinkPreviewHtml[url];
+  const cacheKey = (inline ? 'inl:' : 'blk:') + url;
+  const cachedHtml = cachedLinkPreviewHtml[cacheKey];
   if (isDefined2(cachedHtml)) {
     setTimeout(() => onOk(cachedHtml), 0);
     return;
   }
   const encodedUrl = encodeURIComponent(url);
-  get(`/-/fetch-link-preview?url=${encodedUrl}&curPageId=${curPageId}`,
+  get(`/-/fetch-link-preview?url=${encodedUrl}&curPageId=${curPageId}&inline=${inline}`,
         (previewHtml: St) => {
     // Later: Return '' instead if no preview available? So won't be lots of
     // annoying 40X "failed" requests in the dev tools console.
-    cachedLinkPreviewHtml[url] = previewHtml;
+    cachedLinkPreviewHtml[cacheKey] = previewHtml;
     onOk(previewHtml);
   }, function() {
-    cachedLinkPreviewHtml[url] = null;
+    cachedLinkPreviewHtml[cacheKey] = null;
     // Pass null to tell the editor to show no link preview (and just show a plain link).
     onOk(null);
     // It'd be annoying if error dialogs popped up, whilst typing.

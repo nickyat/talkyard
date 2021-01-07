@@ -21,7 +21,7 @@ import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.{Globals, TextAndHtml, JsonMaker}
 import debiki.dao.{PageStuffDao, UseCache}
-import debiki.onebox.{InstantLinkPrevwRendrEng, LinkPreviewProblem}
+import debiki.onebox.{InstantLinkPrevwRendrEng, LinkPreviewProblem, RenderPreviewParams}
 import ed.server.auth.MaySeeOrWhyNot.{YesMaySee, NopeNoSuchPage, NopeNoPostWithThatNr}
 import org.scalactic.{Bad, Good, Or}
 import scala.util.matching.Regex
@@ -239,8 +239,7 @@ class InstagramPrevwRendrEng(globals: Globals, siteId: SiteId, mayHttpFetch: Boo
 
 // Talkayrd internal links, i.e. to other pages within the same site.
 
-class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSING TyTINTLNPRVW
-                                  // add tests later, when implementing inline links?
+class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
   extends InstantLinkPrevwRendrEng(globals) {
 
   def providerLnPvCssClassName: String = "s_LnPv-Int"
@@ -256,7 +255,8 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
   // change so often — more okay to cache?)
   override def cachePreview = false
 
-  override def handles(uri: j_URI): Bo = {
+  override def handles(uri: j_URI, inline: Bo): Bo = {
+    // inline: Yes, can handle.
     val domainOrAddress: String = uri.getHost  // can be null, fine
 
     // If no hostname, then it's a local link (right?).
@@ -271,7 +271,9 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
   }
 
 
-  protected def renderInstantly(unsafeUri: j_URI): St Or LinkPreviewProblem = {
+  def renderInstantly(renderParams: RenderPreviewParams)
+        : St Or LinkPreviewProblem = {
+    import renderParams.unsafeUri
     val unsafeUrl = unsafeUri.toString
 
     val unsafeUrlPath: St = unsafeUri.getPathEmptyNotNull
@@ -310,6 +312,7 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
             // Suddenly gone? Fine, we're not in a db tx.
             pageFound = false
           case Some(pageStuff) =>
+            // Linked post title.
             unsafeTitle = pageStuff.title
             val anyLinkedReply =
                   if (postPath.postNr == BodyNr) {
@@ -318,6 +321,7 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
                     None
                   }
                   else {
+                    unsafeTitle += s" #post-${postPath.postNr}"  // ?
                     // Linking to a reply.
                     COULD_OPTIMIZE // makes any sense to cache this?
                     val anyPost = dao.loadPostByPageIdNr(
@@ -326,8 +330,8 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
                     anyPost
                   }
 
-            val inline = false  // for now
-            if (inline) {
+            // Any post excerpt.
+            if (renderParams.inline) {
               // Show title only.
             }
             else if (anyLinkedReply.isDefined) {
@@ -379,10 +383,11 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId) // TESTS_MISSI
           if (unsafeExcerpt.isEmpty) {
             // This is either an inline link inside a paragraph — then just
             // show the title. Or a link to a page that apparently is empty,
-            // no excerpt — weird.
+            // but no excerpt — weird.
             safeLink
           }
           else {
+            dieIf(renderParams.inline, "TyE603MSE24", renderParams)
             // This'll get wrapped in an <aside>.  [lnpv_aside]
             val safeExcerpt = TextAndHtml.safeEncodeForHtmlContentOnly(unsafeExcerpt)
             s"""<div>$safeLink</div><blockquote>$safeExcerpt</blockquote>"""
@@ -465,8 +470,8 @@ class TelegramPrevwRendrEng(globals: Globals) extends InstantLinkPrevwRendrEng(g
   override def alreadySanitized = true
 
 
-  def renderInstantly(unsafeUri: j_URI): St Or LinkPreviewProblem = {
-    val unsafeUrl: St = unsafeUri.toString
+  def renderInstantly(linkToRender: RenderPreviewParams): St Or LinkPreviewProblem = {
+    val unsafeUrl = linkToRender.unsafeUrl
     val messageId = (regex findGroupIn unsafeUrl) getOrElse {
       return Bad(LinkPreviewProblem(
             "Couldn't find message id in Telegram link",

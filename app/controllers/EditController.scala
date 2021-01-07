@@ -229,12 +229,10 @@ class EditController @Inject()(cc: ControllerComponents, edContext: EdContext)
     * and gets back Twitter tweet json that shows how to embed the tweet,
     * then creates and returns sanitized onebox html.
     */
-  def fetchLinkPreview(url: St, curPageId: PageId): Action[U] = AsyncGetActionRateLimited(
-        RateLimits.FetchLinkPreview) { request =>
+  def fetchLinkPreview(url: St, curPageId: PageId, inline: Bo): Action[U] =
+        AsyncGetActionRateLimited(RateLimits.FetchLinkPreview) { request =>
     import edContext.globals
     import request.{siteId, requesterOrUnknown}
-
-    val inline = false  // later, query param
 
     throwBadRequestIf(url.isEmpty, "TyELNPVEMPTYURL",
           "Weird URL: Empty string")

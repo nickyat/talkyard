@@ -19,6 +19,134 @@
 // And [[wiki style]] links and later #[tags]?  Check out TiddlyWiki?
 
 
+// Relevant docs:
+// - How Markdown-it works
+//   https://github.com/markdown-it/markdown-it/blob/master/docs/architecture.md
+// - How to replace part of text token with link?
+//   https://github.com/markdown-it/markdown-it/blob/master/docs/development.md#how-to-replace-part-of-text-token-with-link
+// - A simple way to replace link text: Example 2
+//   https://github.com/markdown-it/markdown-it-for-inline
+// - Replacing link attributes (but we replace the whole link / link text instead)
+//   https://github.com/markdown-it/markdown-it/blob/master/docs/architecture.md#renderer,
+//   see e.g. the "how to add target="_blank" to all links:" example.
+
+interface Token {  // why won't tsconfig types: "markdown-it" work?
+  type: St;
+  // attrs[ix][0 = AtrNameIx] is the name of attr nr ix, and attrs[ix][1 = AtrValIx]
+  // is its value.
+  attrs: [St, St][] | Nl;
+  attrIndex: (atrName: St) => Nr;
+  attrPush: (atrNameAndValue: [St, St]) => U;
+  content;
+  markup?: St;
+  tag?: St;
+  map;
+  nesting: Nr;
+  level: Nr;
+  children;
+  info?: St;
+  meta;
+  block: Bo;
+  hidden: Bo;
+}
+
+
+interface BlockLinkPreviewToken extends Token {
+  link: St;
+  level: Nr;
+}
+
+
+const AtrNameIx = 0;
+const AtrValIx = 1;
+
+let origLinkOpenRenderFn: (tokens: Token[], idx: Nr, options, env, self) => St;
+
+function renderLinkOpen(tokens: Token[], idx: Nr, options, env, self): St {
+  console.debug('TOKENS: ' + JSON.stringify(tokens, undefined, 4));
+  // See https://github.com/markdown-it/markdown-it-for-inline#use
+  // example 2 — which replaces the text in a link.
+  const linkOpenToken = tokens[idx];
+  const linkHrefAtrIx: Nr = linkOpenToken.attrIndex('href');
+  const linkUrl = linkHrefAtrIx >= 0 && linkOpenToken.attrs[linkHrefAtrIx][AtrValIx];
+
+  const textToken = tokens[idx + 1];
+  const linkCloseToken = tokens[idx + 2];
+
+  // Only linkify links like  "https://site/some/thing"
+  // but not links with an explicitly choosen title, like "[link title](https://url")
+  // or "<a href=...>link title</a>".
+  // Apparently Markdown-it sets a markup field to 'linkify', for such
+  // auto-detected links (the Markdown-it plugin Linkify-it does this I suppose).
+  const isAutoLink = linkOpenToken.markup === 'linkify';
+
+  if (isAutoLink && linkUrl && textToken?.type === 'text' &&
+        linkCloseToken?.type === 'link_close') {
+    const serverRenderer = debiki.internal.serverSideLinkPreviewRenderer;
+    if (serverRenderer) {
+      // We're server side. In case the string is a Nashorn ConsString,
+      // which won't work now when calling back out to Scala/Java code:
+      const linkJavaSt = String(linkUrl);
+      const inlineJavaBo = Boolean(true);
+      const pageTitle = serverRenderer.renderAndSanitizeLinkPreview( // [js_scala_interop]
+              linkJavaSt, inlineJavaBo);
+      textToken.content = pageTitle; // ` (${textToken.content})`;
+    }
+    else {
+      const randomClass = 'c_LnPv-' + Math.random().toString(36).slice(2);  // [js_rand_val]
+
+      const classAtrIx = linkOpenToken.attrIndex('class');
+      if (classAtrIx >= 0) {
+        const classAtrVal = linkOpenToken.attrs[classAtrIx][AtrValIx];
+        linkOpenToken.attrs[classAtrIx][AtrValIx] =
+              `${classAtrVal} icon icon-loading ${randomClass}`;
+      } else {
+        linkOpenToken.attrPush(['class', randomClass]);
+      }
+
+      console.log('3 tokens: ' +
+            JSON.stringify([linkOpenToken, textToken, linkCloseToken], undefined, 3));
+
+      console.log(`Fetching page title for: ${linkUrl}`)
+
+      debiki2.Server.fetchLinkPreview(linkUrl, true /*inline*/, function(safeHtml) {
+        const Bliss: Ay = window['Bliss'];
+
+        // Dupl code! Break out fn. (897895245)
+        function makeReplacement() {
+          let repl;
+          if (safeHtml) {
+            repl = debiki2.$h.parseHtml(safeHtml)[0];
+          }
+          else {
+            // No link preview available; show a plain <a href=...> link instead.
+            // (rel=nofollow gets added here: [rel_nofollow] for no-preview-attempted
+            // links.)
+            // Sync w server side code [0PVLN].
+            repl = Bliss.create('a', {
+              href: linkUrl,
+              // target: _blank — don't add! without also adding noopener on the next line:
+              rel: 'nofollow',   // + ' noopener' — for [reverse_tabnabbing].
+              text: linkUrl,
+            });
+          }
+          return repl;
+        }
+
+        var placeholders = debiki2.$all('.' + randomClass);
+        // The placeholders might have disappeared, if the editor was closed or the
+        // text deleted, for example.
+        _.each(placeholders, function(ph) {
+          Bliss.after(makeReplacement(), ph);
+          ph.remove();
+        });
+      });
+    }
+  }
+
+  return origLinkOpenRenderFn(tokens, idx, options, env, self);
+};
+
 const pluginId = 'LnPvRndr';  // means LinkPreviewRenderer
 
 
@@ -29,7 +157,14 @@ const pluginId = 'LnPvRndr';  // means LinkPreviewRenderer
  */
 debiki.internal.LinkPreviewMarkdownItPlugin = function(md) {
   md.block.ruler.before('paragraph', pluginId, tryParseLink);
-  md.renderer.rules[pluginId] = renderLinkPreview;
+  md.renderer.rules[pluginId] = renderLinkPreviewBlock;
+
+
+  origLinkOpenRenderFn = md.renderer.rules.link_open ||
+        function(tokens: Token[], idx: Nr, options, env, self): St {
+          return self.renderToken(tokens, idx, options);
+        }
+  md.renderer.rules.link_open = renderLinkOpen;
 };
 
 
@@ -62,29 +197,32 @@ function tryParseLink(state, startLineIndex, endLineIndex, whatIsThis) {
   var link = match[0];
   state.line += 1;
 
-  var token = state.push(pluginId, '');
+  var token = state.push(pluginId, '') as BlockLinkPreviewToken;
   token.link = link;
   token.level = state.level;
   return true;
 }
 
 
-function renderLinkPreview(tokens, index, options, env, renderer_unused) {
+function renderLinkPreviewBlock(tokens: BlockLinkPreviewToken[], index: Nr,
+        options, env, renderer_unused) {
   var token = tokens[index];
   var previewHtml;
   var serverRenderer = debiki.internal.serverSideLinkPreviewRenderer;
   if (serverRenderer) {
     // We're server side. In case the string is a Nashorn ConsString,
     // which won't work now when calling back out to Scala/Java code:
-    var linkAsJavaString = String(token.link);
-    previewHtml =
-          serverRenderer.renderAndSanitizeOnebox(linkAsJavaString); // [js_scala_interop]
+    const linkJavaSt = String(token.link);
+    const inlineJavaBo = Boolean(false);
+    previewHtml = serverRenderer.renderAndSanitizeLinkPreview( // [js_scala_interop]
+          linkJavaSt, inlineJavaBo);
   }
   else {
     var randomClass = 'c_LnPv-' + Math.random().toString(36).slice(2);  // [js_rand_val]
-    debiki2.Server.loadOneboxSafeHtml(token.link, function(safeHtml) {
+    debiki2.Server.fetchLinkPreview(token.link, false /*inline*/, function(safeHtml) {
       const Bliss: Ay = window['Bliss'];
 
+      // Dupl code! Break out fn. (897895245)
       function makeReplacement() {
         let repl;
         if (safeHtml) {

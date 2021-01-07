@@ -189,8 +189,8 @@ abstract class LinkPreviewRenderEngine(globals: Globals) extends TyLogging {  CL
 
   def extraLnPvCssClasses: St
 
-  def handles(uri: j_URI): Bo = handles(uri.toString)
-  def handles(url: St): Bo = regex matches url
+  def handles(uri: j_URI, inline: Bo): Bo = !inline && handles(uri.toString)
+  def handles(url: St): Bo = regex.matches(url)
 
   /** If an engine needs to include an iframe or any "uexpected thing",
     * then it'll have to sanitize everything itself, because
@@ -215,6 +215,8 @@ abstract class LinkPreviewRenderEngine(globals: Globals) extends TyLogging {  CL
     // ----- Any cached preview?
 
     // This prevents pg storage DoS.  [ln_pv_netw_err]
+
+    unimplIf(cachePreview && urlAndFns.inline, "TyE592MSRHG2")
     val anyRedisCache = if (!cachePreview) None else Some {
       COULD_OPTIMIZE // As Redis key, use a url hash, so shorter?
       val redisCache = new RedisCache(urlAndFns.siteId, globals.redisClient, globals.now)
@@ -288,17 +290,18 @@ abstract class LinkPreviewRenderEngine(globals: Globals) extends TyLogging {  CL
       val lnPvErr = if (htmlOrError.isBad) "s_LnPv-Err " else ""
 
       BUG // here urlAndFns.unsafeUrl won't point to the CDN? Doesn't really matter [cdn_nls]
-      val safeHtmlInAside = LinkPreviewHtml.safeAside(   // [lnpv_aside]
+      val safeHtmlWrapped = LinkPreviewHtml.safeWrap(   // [lnpv_aside]
             safeHtml = safeHtmlOkLinks,
             extraLnPvCssClasses = lnPvErr + extraLnPvCssClasses,
             unsafeUrl = urlAndFns.unsafeUrl,
             unsafeProviderName = providerName,
-            addViewAtLink = addViewAtLink)
+            addViewAtLink = addViewAtLink,
+            inline = urlAndFns.inline)
 
       anyRedisCache.foreach(
-            _.putLinkPreviewSafeHtml(urlAndFns.unsafeUrl, safeHtmlInAside))
+            _.putLinkPreviewSafeHtml(urlAndFns.unsafeUrl, safeHtmlWrapped))
 
-      safeHtmlInAside
+      safeHtmlWrapped
     }
 
     // Use if-isCompleted to get an instant result, if possible — Future.map()
@@ -342,10 +345,11 @@ abstract class InstantLinkPrevwRendrEng(globals: Globals)
 
   protected final def loadAndRender(urlAndFns: RenderPreviewParams)
         : Future[String Or LinkPreviewProblem] = {
-    Future.successful(renderInstantly(urlAndFns.unsafeUri))
+    Future.successful(renderInstantly(urlAndFns))
   }
 
-  protected def renderInstantly(unsafeUri: j_URI): St Or LinkPreviewProblem
+  protected def renderInstantly(linkToRender: RenderPreviewParams)
+        : St Or LinkPreviewProblem
 }
 
 
@@ -401,7 +405,6 @@ class LinkPreviewRenderer(
   def fetchRenderSanitize(uri: j_URI, inline: Bo): Future[St] = {
     val url = uri.toString
     require(url.length <= MaxUrlLength, s"Too long url: $url TyE53RKTKDJ5")
-    unimplementedIf(inline, "TyE50KSRDH7")
 
     def loadPreviewFromDatabase(downloadUrl: String): Option[LinkPreview] = {
       // Don't create a write tx — could cause deadlocks, because unfortunately
@@ -413,7 +416,7 @@ class LinkPreviewRenderer(
     }
 
     for (engine <- engines) {
-      if (engine.handles(uri)) {
+      if (engine.handles(uri, inline = inline)) {
         val args = new RenderPreviewParams(
               siteId = siteId,
               fromPageId = NoPageId, // later  [ln_pv_az]
@@ -479,10 +482,9 @@ class LinkPreviewRendererForNashorn(val linkPreviewRenderer: LinkPreviewRenderer
 
   /** Called from javascript running server side in Nashorn.  [js_scala_interop]
     */
-  def renderAndSanitizeOnebox(unsafeUrl: String): String = {
+  def renderAndSanitizeLinkPreview(unsafeUrl: St, inline: Bo): St = {
     lazy val safeUrlInAtr = org.owasp.encoder.Encode.forHtmlAttribute(unsafeUrl)
     lazy val safeUrlInTag = org.owasp.encoder.Encode.forHtmlContent(unsafeUrl)
-    val inline = false // for now
 
     if (!globals.isInitialized) {
       // Also see the comment for Nashorn.startCreatingRenderEngines()
@@ -498,8 +500,12 @@ class LinkPreviewRendererForNashorn(val linkPreviewRenderer: LinkPreviewRenderer
     UX; COULD // target="_blank" — maybe site conf val? [site_conf_vals]
     // Then don't forget  noopener
     // Sync w browser side code [0PVLN].
-    def noPreviewHtmlSt(classAtrVal: St = ""): St =
-      s"""<p><a href="$safeUrlInAtr" rel="nofollow"$classAtrVal>$safeUrlInTag</a></p>"""
+    def noPreviewHtmlSt(classAtrVal: St = ""): St = {
+      val aHref = s"""<a href="$safeUrlInAtr" rel="nofollow"$classAtrVal>${
+            safeUrlInTag}</a></p>"""
+      if (inline) aHref
+      else s"""<p>$aHref</p>"""
+    }
 
     // Allow hash frag, so can #post-123 link to specific posts. [int_ln_hash]
     val unsafeUri = Validation.parseUri(unsafeUrl, allowQuery = true, allowHash = true)
