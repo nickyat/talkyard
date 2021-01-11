@@ -91,6 +91,7 @@ case class PreviewTitleHtml(
   safeTitleCont: Opt[St] = None,
   maybeUnsafeHtml: St,
   // alreadySanitized: Bo,  use instead of LinkPreviewRenderEngine.sandboxInIframe  ?
+  // followLinks: Bo = false,
   )
 
 
@@ -557,7 +558,6 @@ class LinkPreviewRendererForNashorn(val linkPreviewRenderer: LinkPreviewRenderer
   }
 
 
-  // RM inline
   def renderAndSanitizeBlockLinkPreview(unsafeUrl: St): St = {
     lazy val safeUrlInAtr = org.owasp.encoder.Encode.forHtmlAttribute(unsafeUrl)
     lazy val safeUrlInTag = org.owasp.encoder.Encode.forHtmlContent(unsafeUrl)

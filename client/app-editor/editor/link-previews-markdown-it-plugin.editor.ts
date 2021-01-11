@@ -90,15 +90,19 @@ function renderLinkOpen(tokens: Token[], idx: Nr, options, env, self): St {
       const resultJsonSt = serverRenderer.renderAndSanitizeInlineLinkPreview( // [js_scala_interop]
               linkJavaSt);
       const result: InlineLinkPreview = JSON.parse(resultJsonSt);
-      textToken.content = result.safeTitleCont;
-      const classAtrIx = linkOpenToken.attrIndex('class');
-      if (classAtrIx >= 0) {
-        const curClass = linkOpenToken.attrs[classAtrIx][AtrValIx];
-        const newClass = (curClass ? curClass + ' ' : '') + result.classAtr;
-        linkOpenToken.attrs[classAtrIx][AtrValIx] = newClass;
+      if (result.safeTitleCont) {
+        textToken.content = result.safeTitleCont;
       }
-      else {
-        linkOpenToken.attrPush(['class', result.classAtr]);
+      if (result.classAtr) {
+        const classAtrIx = linkOpenToken.attrIndex('class');
+        if (classAtrIx >= 0) {
+          const curClass = linkOpenToken.attrs[classAtrIx][AtrValIx];
+          const newClass = (curClass ? curClass + ' ' : '') + result.classAtr;
+          linkOpenToken.attrs[classAtrIx][AtrValIx] = newClass;
+        }
+        else {
+          linkOpenToken.attrPush(['class', result.classAtr]);
+        }
       }
     }
     else {
@@ -116,15 +120,19 @@ function renderLinkOpen(tokens: Token[], idx: Nr, options, env, self): St {
       console.log(`Fetching page title for: ${linkUrl}`)
 
       debiki2.Server.fetchLinkPreview(linkUrl, true /*inline*/,
-              function(preview: LinkPreviewResp) {
-        var placeholders = debiki2.$all('.' + randomClass);
+              function(preview: LinkPreviewResp | Nl) {
+        const placeholders = debiki2.$all('.' + randomClass);
         // The placeholders might have disappeared, if the editor was closed or the
         // text deleted, for example.
         _.each(placeholders, function(ph: HElm) {
           debiki2.$h.removeClasses(ph, loadingClasses);
-          debiki2.$h.addClasses(ph, preview.classAtr);
-          if (preview.safeTitleCont) {
-            ph.innerText = preview.safeTitleCont;
+          if (preview) {
+            if (preview.classAtr) {
+              debiki2.$h.addClasses(ph, preview.classAtr);
+            }
+            if (preview.safeTitleCont) {
+              ph.innerText = preview.safeTitleCont;
+            }
           }
         });
       });
@@ -209,12 +217,12 @@ function renderLinkPreviewBlock(tokens: BlockLinkPreviewToken[], index: Nr,
   else {
     var randomClass = 'c_LnPv-' + Math.random().toString(36).slice(2);  // [js_rand_val]
     debiki2.Server.fetchLinkPreview(token.link, false /*inline*/,
-            function(preview: LinkPreviewResp) {
+            function(preview: LinkPreviewResp | Nl) {
       const Bliss: Ay = window['Bliss'];
 
       function makeReplacement() {
         let repl;
-        if (preview.safeHtml) {
+        if (preview && preview.safeHtml) {
           repl = debiki2.$h.parseHtml(preview.safeHtml)[0];
         }
         else {

@@ -1630,7 +1630,7 @@ const cachedLinkPreviewHtml: { [url: string]: LinkPreviewResp } = {};
 
 
 export function fetchLinkPreview(url: St, inline: Bo, /* later: curPageId: PageId, */
-        onOk: (resp: LinkPreviewResp) => Vo) {
+        onOk: (resp: LinkPreviewResp | Nl) => Vo) {
   const curPageId = '123'; // whatever, for now
   // People often accidentally append spaces, so trim spaces.
   // But where's a good palce to trim spaces? The caller or here? Here, for now.
