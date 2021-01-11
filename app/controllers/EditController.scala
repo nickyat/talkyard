@@ -264,13 +264,20 @@ class EditController @Inject()(cc: ControllerComponents, edContext: EdContext)
           requesterId = requesterOrUnknown.id)
 
     val response = renderer.fetchRenderSanitize(uri, inline = inline).transform(
-          html => Ok(html),
+          result => {
+            val jsob = Json.obj(  // ts: LinkPreviewResp
+                "safeTitleCont" -> JsString(result.safeTitleCont.getOrElse("")),
+                "classAtr" -> result.classAtr,
+                "safeHtml" -> result.safeHtml,
+                "errCode" -> JsStringOrNull(result.errCode))
+             OkSafeJson(jsob)
+          },
           throwable => throwable match {
             case ex: DebikiException =>
-              ResultException(BadReqResult(
+              RespEx(BadReqResult(
                     "TyELNKPVWEXC", s"Cannot preview that link: ${ex.getMessage}"))
             case _ =>
-              ResultException(BadReqResult(
+              RespEx(BadReqResult(
                     "TyELNKPVWUNK", "Cannot preview that link"))
           })(execCtx)
 

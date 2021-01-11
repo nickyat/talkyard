@@ -27,19 +27,12 @@ import debiki.TextAndHtml.safeEncodeForHtml
 object LinkPreviewHtml {
 
 
-  def safeWrap(safeHtml: St, extraLnPvCssClasses: St,
+  def wrapInSafeAside(safeHtml: St, extraLnPvCssClasses: St,
         unsafeUrl: St, unsafeProviderName: Opt[St],
-        addViewAtLink: Bo, inline: Bo): St = {
+        addViewAtLink: Bo): St = {
 
     require(safeEncodeForHtml(extraLnPvCssClasses) == extraLnPvCssClasses, "TyE06RKTDH2")
     require(startsWithHttpOrHttps(unsafeUrl), "TyELNPVHTTP01")
-
-    if (inline) {
-      return (
-            <span class={s"s_LnPv s_LnPv-Inl $extraLnPvCssClasses"}>{
-              scala.xml.Unparsed(safeHtml)
-            }</span>.toString)
-    }
 
     // 'noopener' stops [reverse_tabnabbing], prevents the new browser tab from
     // redirecting the current browser tab to, say, a phishing site.

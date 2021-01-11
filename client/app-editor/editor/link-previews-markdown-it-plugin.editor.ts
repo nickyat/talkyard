@@ -87,61 +87,51 @@ function renderLinkOpen(tokens: Token[], idx: Nr, options, env, self): St {
       // We're server side. In case the string is a Nashorn ConsString,
       // which won't work now when calling back out to Scala/Java code:
       const linkJavaSt = String(linkUrl);
-      const inlineJavaBo = Boolean(true);
-      const pageTitle = serverRenderer.renderAndSanitizeLinkPreview( // [js_scala_interop]
-              linkJavaSt, inlineJavaBo);
-      textToken.content = pageTitle; // ` (${textToken.content})`;
+      const resultJsonSt = serverRenderer.renderAndSanitizeInlineLinkPreview( // [js_scala_interop]
+              linkJavaSt);
+      const result: InlineLinkPreview = JSON.parse(resultJsonSt);
+      textToken.content = result.safeTitleCont;
+      const classAtrIx = linkOpenToken.attrIndex('class');
+      if (classAtrIx >= 0) {
+        const curClass = linkOpenToken.attrs[classAtrIx][AtrValIx];
+        const newClass = (curClass ? curClass + ' ' : '') + result.classAtr;
+        linkOpenToken.attrs[classAtrIx][AtrValIx] = newClass;
+      }
+      else {
+        linkOpenToken.attrPush(['class', result.classAtr]);
+      }
     }
     else {
       const randomClass = 'c_LnPv-' + Math.random().toString(36).slice(2);  // [js_rand_val]
+      const loadingClasses = `icon icon-loading ${randomClass}`;
 
       const classAtrIx = linkOpenToken.attrIndex('class');
       if (classAtrIx >= 0) {
-        const classAtrVal = linkOpenToken.attrs[classAtrIx][AtrValIx];
-        linkOpenToken.attrs[classAtrIx][AtrValIx] =
-              `${classAtrVal} icon icon-loading ${randomClass}`;
+        const curClass = linkOpenToken.attrs[classAtrIx][AtrValIx];
+        linkOpenToken.attrs[classAtrIx][AtrValIx] = `${curClass} ${loadingClasses}`;
       } else {
-        linkOpenToken.attrPush(['class', randomClass]);
+        linkOpenToken.attrPush(['class', loadingClasses]);
       }
-
-      console.log('3 tokens: ' +
-            JSON.stringify([linkOpenToken, textToken, linkCloseToken], undefined, 3));
 
       console.log(`Fetching page title for: ${linkUrl}`)
 
-      debiki2.Server.fetchLinkPreview(linkUrl, true /*inline*/, function(safeHtml) {
-        const Bliss: Ay = window['Bliss'];
-
-        // Dupl code! Break out fn. (897895245)
-        function makeReplacement() {
-          let repl;
-          if (safeHtml) {
-            repl = debiki2.$h.parseHtml(safeHtml)[0];
-          }
-          else {
-            // No link preview available; show a plain <a href=...> link instead.
-            // (rel=nofollow gets added here: [rel_nofollow] for no-preview-attempted
-            // links.)
-            // Sync w server side code [0PVLN].
-            repl = Bliss.create('a', {
-              href: linkUrl,
-              // target: _blank — don't add! without also adding noopener on the next line:
-              rel: 'nofollow',   // + ' noopener' — for [reverse_tabnabbing].
-              text: linkUrl,
-            });
-          }
-          return repl;
-        }
-
+      debiki2.Server.fetchLinkPreview(linkUrl, true /*inline*/,
+              function(preview: LinkPreviewResp) {
         var placeholders = debiki2.$all('.' + randomClass);
         // The placeholders might have disappeared, if the editor was closed or the
         // text deleted, for example.
-        _.each(placeholders, function(ph) {
-          Bliss.after(makeReplacement(), ph);
-          ph.remove();
+        _.each(placeholders, function(ph: HElm) {
+          debiki2.$h.removeClasses(ph, loadingClasses);
+          debiki2.$h.addClasses(ph, preview.classAtr);
+          if (preview.safeTitleCont) {
+            ph.innerText = preview.safeTitleCont;
+          }
         });
       });
     }
+
+    console.log('3 tokens: ' +
+          JSON.stringify([linkOpenToken, textToken, linkCloseToken], undefined, 3));
   }
 
   return origLinkOpenRenderFn(tokens, idx, options, env, self);
@@ -213,20 +203,19 @@ function renderLinkPreviewBlock(tokens: BlockLinkPreviewToken[], index: Nr,
     // We're server side. In case the string is a Nashorn ConsString,
     // which won't work now when calling back out to Scala/Java code:
     const linkJavaSt = String(token.link);
-    const inlineJavaBo = Boolean(false);
-    previewHtml = serverRenderer.renderAndSanitizeLinkPreview( // [js_scala_interop]
-          linkJavaSt, inlineJavaBo);
+    previewHtml = serverRenderer.renderAndSanitizeBlockLinkPreview( // [js_scala_interop]
+          linkJavaSt);
   }
   else {
     var randomClass = 'c_LnPv-' + Math.random().toString(36).slice(2);  // [js_rand_val]
-    debiki2.Server.fetchLinkPreview(token.link, false /*inline*/, function(safeHtml) {
+    debiki2.Server.fetchLinkPreview(token.link, false /*inline*/,
+            function(preview: LinkPreviewResp) {
       const Bliss: Ay = window['Bliss'];
 
-      // Dupl code! Break out fn. (897895245)
       function makeReplacement() {
         let repl;
-        if (safeHtml) {
-          repl = debiki2.$h.parseHtml(safeHtml)[0];
+        if (preview.safeHtml) {
+          repl = debiki2.$h.parseHtml(preview.safeHtml)[0];
         }
         else {
           // No link preview available; show a plain <a href=...> link instead.

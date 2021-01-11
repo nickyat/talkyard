@@ -21,7 +21,7 @@ import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.{Globals, TextAndHtml, JsonMaker}
 import debiki.dao.{PageStuffDao, UseCache}
-import debiki.onebox.{InstantLinkPrevwRendrEng, LinkPreviewProblem, RenderPreviewParams}
+import debiki.onebox.{InstantLinkPrevwRendrEng, LinkPreviewProblem, RenderPreviewParams, PreviewTitleHtml}
 import ed.server.auth.MaySeeOrWhyNot.{YesMaySee, NopeNoSuchPage, NopeNoPostWithThatNr}
 import org.scalactic.{Bad, Good, Or}
 import scala.util.matching.Regex
@@ -271,8 +271,13 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
   }
 
 
-  def renderInstantly(renderParams: RenderPreviewParams)
-        : St Or LinkPreviewProblem = {
+  // Will remove, later
+  def renderInstantly(linkToRender: RenderPreviewParams)
+        : St Or LinkPreviewProblem = die("TyE602RMMDK35")
+
+
+  override def renderInstantly2(renderParams: RenderPreviewParams)
+        : PreviewTitleHtml Or LinkPreviewProblem = {
     import renderParams.unsafeUri
     val unsafeUrl = unsafeUri.toString
 
@@ -321,7 +326,7 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
                     None
                   }
                   else {
-                    unsafeTitle += s" #post-${postPath.postNr}"  // ?
+                    unsafeTitle += s" #post-${postPath.postNr}"
                     // Linking to a reply.
                     COULD_OPTIMIZE // makes any sense to cache this?
                     val anyPost = dao.loadPostByPageIdNr(
@@ -330,11 +335,8 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
                     anyPost
                   }
 
-            // Any post excerpt.
-            if (renderParams.inline) {
-              // Show title only.
-            }
-            else if (anyLinkedReply.isDefined) {
+            // Orig post or reply excerpt.
+            if (anyLinkedReply.isDefined) {
               val replyPost = anyLinkedReply.get
               replyPost.approvedHtmlSanitized foreach { html =>
                 // This also for orig posts, see: [post_excerpts].
@@ -377,17 +379,14 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
     }
 
     val safeUrlAttr = TextAndHtml.safeEncodeForHtmlAttrOnly(unsafeUrl)
-    val safeTitle = TextAndHtml.safeEncodeForHtmlContentOnly(unsafeTitle)
-    val safeLink = s"""<a href="$safeUrlAttr">$safeTitle</a>"""
+    val safeTitleCont = TextAndHtml.safeEncodeForHtmlContentOnly(unsafeTitle)
+    val safeLink = s"""<a href="$safeUrlAttr">$safeTitleCont</a>"""
     var safePreview: St =
           if (unsafeExcerpt.isEmpty) {
-            // This is either an inline link inside a paragraph — then just
-            // show the title. Or a link to a page that apparently is empty,
-            // but no excerpt — weird.
+            // Empty page, no text to show? Then skip the blockquote.
             safeLink
           }
           else {
-            dieIf(renderParams.inline, "TyE603MSE24", renderParams)
             // This'll get wrapped in an <aside>.  [lnpv_aside]
             val safeExcerpt = TextAndHtml.safeEncodeForHtmlContentOnly(unsafeExcerpt)
             s"""<div>$safeLink</div><blockquote>$safeExcerpt</blockquote>"""
@@ -396,7 +395,9 @@ class InternalLinkPrevwRendrEng(globals: Globals, siteId: SiteId)
     // Not needed, do anyway:
     safePreview = TextAndHtml.sanitizeInternalLinksAndQuotes(safePreview)
 
-    Good(safePreview)
+    Good(PreviewTitleHtml(
+          safeTitleCont = Some(safeTitleCont),
+          maybeUnsafeHtml = safePreview))
   }
 
 }
